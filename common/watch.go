@@ -1,6 +1,7 @@
 package common
 
 import (
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -122,7 +123,7 @@ func WatchForChanges(cfg RepoConfig) error {
 	//
 	notifyChannel := make(chan notify.EventInfo, 100)
 
-	err = notify.Watch(filepath.Join(repoPath, "..."), notifyChannel, notify.Write, notify.Rename, notify.Remove, notify.Create)
+	err = watchDirectories(repoPath, repoPath, notifyChannel)
 	if err != nil {
 		return tracerr.Wrap(err)
 	}
@@ -138,6 +139,48 @@ func WatchForChanges(cfg RepoConfig) error {
 			continue
 		}
 
+		// A newly created/renamed directory needs watches for future edits,
+		// even when it is initially empty. Deleted paths need no new watch.
+		if info, statErr := os.Stat(ei.Path()); statErr == nil && info.IsDir() {
+			if err := watchDirectories(repoPath, ei.Path(), notifyChannel); err != nil {
+				return err
+			}
+		}
 		notifyFilteredChannel <- true
 	}
+}
+
+// Register nonrecursive watches, pruning Git metadata and ignored directories.
+// WalkDir reads directory entries without statting every volatile runtime file.
+func watchDirectories(repoPath, start string, events chan notify.EventInfo) error {
+	return filepath.WalkDir(start, func(path string, entry fs.DirEntry, err error) error {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if !entry.IsDir() {
+			return nil
+		}
+		if entry.Name() == ".git" {
+			return filepath.SkipDir
+		}
+		if path != repoPath {
+			ignored, err := isFileIgnoredByGit(repoPath, path+string(os.PathSeparator))
+			if err != nil {
+				return err
+			}
+			if ignored {
+				return filepath.SkipDir
+			}
+		}
+		if err := notify.Watch(path, events, notify.Write, notify.Rename, notify.Remove, notify.Create); err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		return nil
+	})
 }

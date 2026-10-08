@@ -7,62 +7,56 @@ import (
 	"strings"
 
 	"github.com/ztrue/tracerr"
-	git "gopkg.in/src-d/go-git.v4"
 )
 
 func commit(repoConfig RepoConfig) error {
 	repoPath := repoConfig.RepoPath
-	repo, err := git.PlainOpenWithOptions(repoPath, &git.PlainOpenOptions{DetectDotGit: true})
+	status, err := GitCommand(repoConfig, []string{"status", "--porcelain=v1", "-z", "--untracked-files=all"})
 	if err != nil {
 		return tracerr.Wrap(err)
 	}
-
-	w, err := repo.Worktree()
-	if err != nil {
-		return tracerr.Wrap(err)
-	}
-
-	status, err := w.Status()
-	if err != nil {
-		return tracerr.Wrap(err)
-	}
-
-	hasChanges := false
 	commitMsg := []string{}
-	for filePath, fileStatus := range status {
-		if fileStatus.Worktree == git.Unmodified && fileStatus.Staging == git.Unmodified {
+	entries := strings.Split(status.String(), "\x00")
+	for i := 0; i < len(entries); i++ {
+		entry := entries[i]
+		if entry == "" {
 			continue
 		}
-
+		if len(entry) < 4 {
+			return tracerr.Errorf("malformed git status entry: %q", entry)
+		}
+		code, filePath := entry[:2], entry[3:]
+		paths := []string{filePath}
+		if strings.ContainsAny(code, "RC") {
+			i++
+			if i >= len(entries) || entries[i] == "" {
+				return tracerr.Errorf("missing rename source for %q", filePath)
+			}
+			if code[1] == 'R' {
+				paths = append(paths, entries[i])
+			}
+		}
 		ignore, err := ShouldIgnoreFile(repoPath, filePath)
 		if err != nil {
 			return tracerr.Wrap(err)
 		}
-
 		if ignore {
 			continue
 		}
-
-		hasChanges = true
-		_, err = w.Add(filePath)
+		_, err = GitCommand(repoConfig, append([]string{"add", "-A", "--"}, paths...))
 		if err != nil {
 			return tracerr.Wrap(err)
 		}
-
-		msg := ""
-		if fileStatus.Worktree == git.Untracked && fileStatus.Staging == git.Untracked {
-			msg += "?? "
-		} else {
-			msg += " " + string(fileStatus.Worktree) + " "
+		prefix := " " + string(code[1]) + " "
+		if code == "??" {
+			prefix = "?? "
 		}
-		msg += filePath
-		commitMsg = append(commitMsg, msg)
+		commitMsg = append(commitMsg, prefix+filePath)
 	}
-
 	sort.Strings(commitMsg)
 	msg := strings.Join(commitMsg, "\n")
 
-	if !hasChanges {
+	if len(commitMsg) == 0 {
 		return nil
 	}
 

@@ -1,14 +1,15 @@
 package common
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/ztrue/tracerr"
-	git "gopkg.in/src-d/go-git.v4"
-	"gopkg.in/src-d/go-git.v4/plumbing/format/gitignore"
 )
 
 func ShouldIgnoreFile(repoPath string, filePath string) (bool, error) {
@@ -25,42 +26,38 @@ func ShouldIgnoreFile(repoPath string, filePath string) (bool, error) {
 		return true, nil
 	}
 
-	relativePath := filePath[len(repoPath)+1:]
-	if strings.HasPrefix(relativePath, ".git/") {
-		return true, nil
-	}
-
-	empty, err := isEmptyFile(filePath)
+	relativePath, err := filepath.Rel(repoPath, filePath)
 	if err != nil {
-		return false, tracerr.Wrap(err)
+		return false, err
 	}
-	if empty {
+	if relativePath == ".git" || strings.HasPrefix(relativePath, ".git"+string(os.PathSeparator)) {
 		return true, nil
 	}
 
-	return isFileIgnoredByGit(repoPath, filePath)
+	// Native Git prunes ignored directories instead of recursively reading
+	// their contents, which may disappear while a runtime database writes.
+	ignored, err := isFileIgnoredByGit(repoPath, filePath)
+	if err != nil || ignored {
+		return ignored, err
+	}
+	return isEmptyFile(filePath)
 }
 
 func isFileIgnoredByGit(repoPath string, filePath string) (bool, error) {
-	repo, err := git.PlainOpenWithOptions(repoPath, &git.PlainOpenOptions{DetectDotGit: true})
-	if err != nil {
-		return false, tracerr.Wrap(err)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "check-ignore", "--quiet", "--", filePath)
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		return true, nil
 	}
-
-	w, err := repo.Worktree()
-	if err != nil {
-		return false, tracerr.Wrap(err)
+	if ctx.Err() != nil {
+		return false, ctx.Err()
 	}
-
-	patterns, err := gitignore.ReadPatterns(w.Filesystem, nil)
-	if err != nil {
-		return false, tracerr.Wrap(err)
+	if exit, ok := err.(*exec.ExitError); ok && exit.ExitCode() == 1 {
+		return false, nil
 	}
-
-	patterns = append(patterns, w.Excludes...)
-	m := gitignore.NewMatcher(patterns)
-
-	return m.Match([]string{filePath}, false), err
+	return false, tracerr.Errorf("git check-ignore: %w: %s", err, output)
 }
 
 func isEmptyFile(filePath string) (bool, error) {
