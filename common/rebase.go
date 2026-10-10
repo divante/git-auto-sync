@@ -2,6 +2,7 @@ package common
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path"
@@ -33,9 +34,9 @@ func rebase(repoConfig RepoConfig) error {
 			if err != nil {
 				return tracerr.Wrap(err)
 			}
-			return errRebaseFailed
+			return fmt.Errorf("%w: %v", errRebaseFailed, rebaseErr)
 		}
-		return tracerr.Wrap(err)
+		return tracerr.Wrap(rebaseErr)
 	}
 
 	return nil

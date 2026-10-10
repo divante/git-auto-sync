@@ -2,10 +2,14 @@ package common
 
 import (
 	"errors"
+	"log"
 
 	"github.com/gen2brain/beeep"
 	"github.com/ztrue/tracerr"
 )
+
+// notifyConflict is replaced in tests
+var notifyConflict = beeep.Alert
 
 // FIXME: Add logs for when we commit, pull, and push
 func AutoSync(repoConfig RepoConfig) error {
@@ -29,9 +33,10 @@ func AutoSync(repoConfig RepoConfig) error {
 	if err != nil {
 		if errors.Is(err, errRebaseFailed) {
 			repoPath := repoConfig.RepoPath
-			err := beeep.Alert("Git Auto Sync - Conflict", "Could not rebase for - "+repoPath, "assets/warning.png")
-			if err != nil {
-				return tracerr.Wrap(err)
+			// The alert is best effort; on a headless host it fails and must not
+			// replace the rebase error that explains the stop.
+			if notifyErr := notifyConflict("Git Auto Sync - Conflict", "Could not rebase for - "+repoPath, "assets/warning.png"); notifyErr != nil {
+				log.Printf("%s conflict notification failed: %v", repoPath, notifyErr)
 			}
 		}
 		// How should we continue?

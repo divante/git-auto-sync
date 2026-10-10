@@ -1,6 +1,10 @@
 package common
 
 import (
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	git "gopkg.in/src-d/go-git.v4"
@@ -85,10 +89,23 @@ func Test_RebaseBothCommitsConflict(t *testing.T) {
 	assert.NilError(t, err)
 
 	err = rebase(repoConfig)
-	assert.Equal(t, err, errRebaseFailed)
+	assert.Assert(t, errors.Is(err, errRebaseFailed))
+	// The git output names the conflict instead of being discarded
+	assert.Assert(t, strings.Contains(err.Error(), "CONFLICT"), err.Error())
 
 	newHead, err := r.Head()
 	assert.NilError(t, err)
 
 	assert.Check(t, newHead.Hash() == origHead.Hash())
+}
+
+// A rebase git refuses to start (dirty tree) must not be reported as success
+func Test_RebaseDirtyTreeReturnsError(t *testing.T) {
+	repoConfig := PrepareMultiFixtures(t, "rebase_both_commits", []string{"rebase_parent"})
+
+	err := os.WriteFile(filepath.Join(repoConfig.RepoPath, "1.md"), []byte("dirty\n"), 0644)
+	assert.NilError(t, err)
+
+	err = rebase(repoConfig)
+	assert.ErrorContains(t, err, "unstaged changes")
 }
