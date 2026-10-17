@@ -99,13 +99,30 @@ func Test_RebaseBothCommitsConflict(t *testing.T) {
 	assert.Check(t, newHead.Hash() == origHead.Hash())
 }
 
-// A rebase git refuses to start (dirty tree) must not be reported as success
+// A rebase git refuses to start (dirty tree) is reported as errDirtyTree, not
+// success or a conflict, and leaves the local change and HEAD untouched
 func Test_RebaseDirtyTreeReturnsError(t *testing.T) {
 	repoConfig := PrepareMultiFixtures(t, "rebase_both_commits", []string{"rebase_parent"})
 
-	err := os.WriteFile(filepath.Join(repoConfig.RepoPath, "1.md"), []byte("dirty\n"), 0644)
+	r, err := git.PlainOpen(repoConfig.RepoPath)
+	assert.NilError(t, err)
+	origHead, err := r.Head()
+	assert.NilError(t, err)
+
+	dirtyPath := filepath.Join(repoConfig.RepoPath, "1.md")
+	err = os.WriteFile(dirtyPath, []byte("dirty\n"), 0644)
 	assert.NilError(t, err)
 
 	err = rebase(repoConfig)
+	assert.Assert(t, errors.Is(err, errDirtyTree), err)
+	assert.Assert(t, !errors.Is(err, errRebaseFailed), err)
 	assert.ErrorContains(t, err, "unstaged changes")
+
+	newHead, err := r.Head()
+	assert.NilError(t, err)
+	assert.Equal(t, newHead.Hash(), origHead.Hash())
+
+	content, err := os.ReadFile(dirtyPath)
+	assert.NilError(t, err)
+	assert.Equal(t, string(content), "dirty\n")
 }

@@ -3,6 +3,7 @@ package common
 import (
 	"bytes"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -36,7 +37,12 @@ func commit(repoConfig RepoConfig) error {
 				paths = append(paths, entries[i])
 			}
 		}
-		ignore, err := ShouldIgnoreFile(repoPath, filePath)
+		// An emptied tracked file is a real change; skipping it would leave the
+		// tree dirty and make the rebase refuse to start.
+		ignore, err := isIgnoredPath(repoPath, filePath)
+		if err == nil && !ignore && code == "??" {
+			ignore, err = isEmptyFile(filepath.Join(repoPath, filePath))
+		}
 		if err != nil {
 			return tracerr.Wrap(err)
 		}

@@ -14,6 +14,10 @@ import (
 
 var errRebaseFailed = errors.New("git rebase failed")
 
+// errDirtyTree means git refused to start the rebase because tracked files
+// changed after the commit step, usually a write racing the sync cycle.
+var errDirtyTree = errors.New("git rebase refused: tracked changes in working tree")
+
 func rebase(repoConfig RepoConfig) error {
 	repoPath := repoConfig.RepoPath
 	bi, err := fetchBranchInfo(repoPath)
@@ -35,6 +39,14 @@ func rebase(repoConfig RepoConfig) error {
 				return tracerr.Wrap(err)
 			}
 			return fmt.Errorf("%w: %v", errRebaseFailed, rebaseErr)
+		}
+
+		status, err := GitCommand(repoConfig, []string{"status", "--porcelain", "--untracked-files=no"})
+		if err != nil {
+			return tracerr.Wrap(err)
+		}
+		if !rebaseInProgress && status.Len() > 0 {
+			return fmt.Errorf("%w: %v", errDirtyTree, rebaseErr)
 		}
 		return tracerr.Wrap(rebaseErr)
 	}

@@ -17,6 +17,20 @@ func ShouldIgnoreFile(repoPath string, filePath string) (bool, error) {
 		filePath = path.Join(repoPath, filePath)
 	}
 
+	ignored, err := isIgnoredPath(repoPath, filePath)
+	if err != nil || ignored {
+		return ignored, err
+	}
+	return isEmptyFile(filePath)
+}
+
+// isIgnoredPath applies every ignore rule except the empty-file placeholder
+// rule, which only suits files Git does not track yet.
+func isIgnoredPath(repoPath string, filePath string) (bool, error) {
+	if !filepath.IsAbs(filePath) {
+		filePath = path.Join(repoPath, filePath)
+	}
+
 	fileName := filepath.Base(filePath)
 	var isTempFile = strings.HasSuffix(fileName, ".swp") || // vim
 		strings.HasPrefix(fileName, "~") || // emacs
@@ -36,11 +50,7 @@ func ShouldIgnoreFile(repoPath string, filePath string) (bool, error) {
 
 	// Native Git prunes ignored directories instead of recursively reading
 	// their contents, which may disappear while a runtime database writes.
-	ignored, err := isFileIgnoredByGit(repoPath, filePath)
-	if err != nil || ignored {
-		return ignored, err
-	}
-	return isEmptyFile(filePath)
+	return isFileIgnoredByGit(repoPath, filePath)
 }
 
 func isFileIgnoredByGit(repoPath string, filePath string) (bool, error) {

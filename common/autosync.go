@@ -30,6 +30,12 @@ func AutoSync(repoConfig RepoConfig) error {
 	}
 
 	err = rebase(repoConfig)
+	if errors.Is(err, errDirtyTree) {
+		// The racing write produces its own event, and the next cycle commits
+		// it before rebasing. Exiting here would only restart the daemon.
+		log.Printf("%s: skipping sync cycle: %v", repoConfig.RepoPath, err)
+		return nil
+	}
 	if err != nil {
 		if errors.Is(err, errRebaseFailed) {
 			repoPath := repoConfig.RepoPath

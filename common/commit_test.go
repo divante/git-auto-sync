@@ -107,3 +107,34 @@ func Test_MultipleFileChange(t *testing.T) {
 ?? dirB/3.md
 `)
 }
+
+// Emptying a tracked file is a real change; leaving it uncommitted would
+// make every later rebase refuse to start
+func Test_EmptiedTrackedFile(t *testing.T) {
+	repoConfig := PrepareFixture(t, "no_changes")
+
+	err := os.WriteFile(filepath.Join(repoConfig.RepoPath, "1.md"), nil, 0644)
+	assert.NilError(t, err)
+
+	err = commit(repoConfig)
+	assert.NilError(t, err)
+
+	HasHeadCommit(t, repoConfig.RepoPath, "28cc969d97ddb7640f5e1428bbc8f2947d1ffd57", " M 1.md\n")
+}
+
+// A new empty file is still treated as an editor placeholder
+func Test_NewEmptyFileIgnored(t *testing.T) {
+	repoConfig := PrepareFixture(t, "no_changes")
+
+	err := os.WriteFile(filepath.Join(repoConfig.RepoPath, "2.md"), nil, 0644)
+	assert.NilError(t, err)
+
+	err = commit(repoConfig)
+	assert.NilError(t, err)
+
+	r, err := git.PlainOpen(repoConfig.RepoPath)
+	assert.NilError(t, err)
+	head, err := r.Head()
+	assert.NilError(t, err)
+	assert.Equal(t, head.Hash(), plumbing.NewHash("28cc969d97ddb7640f5e1428bbc8f2947d1ffd57"))
+}
